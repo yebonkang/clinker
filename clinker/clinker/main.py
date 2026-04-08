@@ -97,7 +97,6 @@ def clinker(
     session=None,
     identity=0.3,
     sequence_type="protein",
-    link_mode="best",
     delimiter=None,
     decimals=2,
     plot=None,
@@ -118,7 +117,7 @@ def clinker(
 ):
     """Entry point for running the script."""
     LOG.info("Starting clinker")
-    aligner_config = {"sequence_type": sequence_type, "link_mode": link_mode}
+    aligner_config = {"sequence_type": sequence_type, "link_mode": "best"}
 
     load_session = session and Path(session).exists()
 
@@ -149,7 +148,7 @@ def clinker(
 
             LOG.info("Adding clusters to loaded session and aligning")
             globaligner.aligner_config["sequence_type"] = sequence_type
-            globaligner.aligner_config["link_mode"] = link_mode
+            globaligner.aligner_config["link_mode"] = "best"
             globaligner.add_clusters(*clusters)
             globaligner.align_stored_clusters(cutoff=identity, jobs=jobs)
             globaligner.build_gene_groups(functions=gene_functions, colours=colour_map)
@@ -181,7 +180,7 @@ def clinker(
         if no_align:
             globaligner = align.Globaligner()
             globaligner.aligner_config["sequence_type"] = sequence_type
-            globaligner.aligner_config["link_mode"] = link_mode
+            globaligner.aligner_config["link_mode"] = "best"
             globaligner.add_clusters(*clusters)
             globaligner.build_gene_groups(functions=gene_functions, colours=colour_map)
         elif len(clusters) == 1:
@@ -330,13 +329,6 @@ def get_parser():
         help="Sequence type used for pairwise alignment [default: protein]",
     )
     alignment.add_argument(
-        "-lm",
-        "--link_mode",
-        choices=("all", "best"),
-        default="best",
-        help="Which links to keep: all hits or reciprocal best hits [default: best]",
-    )
-    alignment.add_argument(
         "-j",
         "--jobs",
         help="Number of alignments to run in parallel (0 to use the number of CPUs) [default: 0]",
@@ -395,7 +387,6 @@ def main():
         json_indent=args.json_indent,
         identity=args.identity,
         sequence_type=args.sequence_type,
-        link_mode=args.link_mode,
         delimiter=args.delimiter,
         decimals=args.decimals,
         plot=args.plot,

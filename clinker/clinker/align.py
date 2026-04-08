@@ -240,10 +240,9 @@ class Globaligner(Serializer):
         self.groups = []
         self.clusters = OrderedDict()
 
-        if aligner_config is None:
-            self.aligner_config = self.aligner_default.copy()
-        else:
-            self.aligner_config = aligner_config
+        self.aligner_config = self.aligner_default.copy()
+        if aligner_config:
+            self.aligner_config.update(aligner_config)
 
     def to_dict(self):
         """Serialises the Globaligner instance to dict.
@@ -406,7 +405,7 @@ class Globaligner(Serializer):
         aligner = Align.PairwiseAligner()
         config = config.copy()
         sequence_type = config.pop("sequence_type", "protein")
-        link_mode = config.pop("link_mode", "all")
+        link_mode = config.pop("link_mode", "best")
         if sequence_type not in {"protein", "nucleotide"}:
             LOG.warning("Invalid sequence_type '(%s)', defaulting to protein", sequence_type)
             sequence_type = "protein"
@@ -434,11 +433,12 @@ class Globaligner(Serializer):
             # PairwiseAligner cannot use substitution_matrix together with
             # match/mismatch scores, so remove any configured matrix.
             config.pop("substitution_matrix", None)
-            # BLASTN-like default scoring profile.
-            config.setdefault("match_score", 1.0)
-            config.setdefault("mismatch_score", -2.0)
-            config.setdefault("open_gap_score", -5.0)
-            config.setdefault("extend_gap_score", -2.0)
+            # BLASTN-like default scoring profile for nucleotide alignments.
+            # Force these values so protein defaults are not reused.
+            config["match_score"] = 1.0
+            config["mismatch_score"] = -2.0
+            config["open_gap_score"] = -5.0
+            config["extend_gap_score"] = -2.0
 
         for k, v in config.items():
             setattr(aligner, k, v)
@@ -568,7 +568,7 @@ class Globaligner(Serializer):
             genes = set(genes)
             overlaps = [i for i, _ in enumerate(self.groups) if not genes.isdisjoint(group.genes)]
             if not overlaps:
-                group = Group(label=f"Group {len(self.groups)}", genes=genes)
+                group = Group(label=f"group{len(self.groups) + 1}", genes=genes)
                 self.groups.append(group)
                 continue
             keep_idx = overlaps[0]
