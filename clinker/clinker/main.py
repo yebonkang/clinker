@@ -96,8 +96,6 @@ def clinker(
     files,
     session=None,
     identity=0.3,
-    sequence_type="protein",
-    link_mode="best",
     delimiter=None,
     decimals=2,
     plot=None,
@@ -118,7 +116,6 @@ def clinker(
 ):
     """Entry point for running the script."""
     LOG.info("Starting clinker")
-    aligner_config = {"sequence_type": sequence_type, "link_mode": link_mode}
 
     load_session = session and Path(session).exists()
 
@@ -148,8 +145,6 @@ def clinker(
             clusters = parse_files(paths, ranges=ranges, set_origin=set_origin)
 
             LOG.info("Adding clusters to loaded session and aligning")
-            globaligner.aligner_config["sequence_type"] = sequence_type
-            globaligner.aligner_config["link_mode"] = link_mode
             globaligner.add_clusters(*clusters)
             globaligner.align_stored_clusters(cutoff=identity, jobs=jobs)
             globaligner.build_gene_groups(functions=gene_functions, colours=colour_map)
@@ -180,20 +175,13 @@ def clinker(
         # Align all clusters
         if no_align:
             globaligner = align.Globaligner()
-            globaligner.aligner_config["sequence_type"] = sequence_type
-            globaligner.aligner_config["link_mode"] = link_mode
             globaligner.add_clusters(*clusters)
             globaligner.build_gene_groups(functions=gene_functions, colours=colour_map)
         elif len(clusters) == 1:
-            globaligner = align.align_clusters(clusters[0], aligner_config=aligner_config, jobs=1)
+            globaligner = align.align_clusters(clusters[0], jobs=1)
         else:
             LOG.info("Starting cluster alignments")
-            globaligner = align.align_clusters(
-                *clusters,
-                cutoff=identity,
-                aligner_config=aligner_config,
-                jobs=jobs,
-            )
+            globaligner = align.align_clusters(*clusters, cutoff=identity, jobs=jobs)
             globaligner.build_gene_groups(functions=gene_functions, colours=colour_map)
 
     if globaligner.alignments:
@@ -323,20 +311,6 @@ def get_parser():
         default=0.3
     )
     alignment.add_argument(
-        "-st",
-        "--sequence_type",
-        choices=("protein", "nucleotide"),
-        default="protein",
-        help="Sequence type used for pairwise alignment [default: protein]",
-    )
-    alignment.add_argument(
-        "-lm",
-        "--link_mode",
-        choices=("all", "best"),
-        default="best",
-        help="Which links to keep: all hits or reciprocal best hits [default: best]",
-    )
-    alignment.add_argument(
         "-j",
         "--jobs",
         help="Number of alignments to run in parallel (0 to use the number of CPUs) [default: 0]",
@@ -394,8 +368,6 @@ def main():
         session=args.session,
         json_indent=args.json_indent,
         identity=args.identity,
-        sequence_type=args.sequence_type,
-        link_mode=args.link_mode,
         delimiter=args.delimiter,
         decimals=args.decimals,
         plot=args.plot,
