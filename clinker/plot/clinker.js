@@ -77,6 +77,7 @@ function plot(data) {
   let plot = d3.select("#plot")
 		.data([data])
     .call(chart)
+  updateLinkLabelText()
 
   d3.select("#btn-save-svg")
     .on("click", () => {
@@ -114,6 +115,7 @@ function plot(data) {
 			plot.selectAll("*").remove()
 			plot.data([newData.data])
 			plot.call(chart)
+      updateLinkLabelText()
 		}
 		reader.onerror = function() {
 			console.log("Failed to load data", reader.error)
@@ -129,6 +131,44 @@ function plot(data) {
   function update(opts) {
     chart.config(opts) 
     plot.call(chart)
+    updateLinkLabelText()
+  }
+
+  function updateLinkLabelText() {
+    const showLabels = d3.select("#input-link-label-show").property("checked")
+    const showMismatches = d3.select("#input-link-mismatch-show").property("checked")
+    const showMismatchBackground = d3.select("#input-link-mismatch-labelbg-show").property("checked")
+    const fallbackFontSize = +d3.select("#input-link-fontsize").property("value") || 10
+
+    plot.selectAll("g.geneLinkG").each(function(d) {
+      const group = d3.select(this)
+      const label = group.select("text.geneLinkLabel")
+      group.selectAll("text.geneLinkMismatchLabel").remove()
+
+      const identity = Number.isFinite(+d.identity) ? (+d.identity).toFixed(2) : ""
+      label.text(identity)
+
+      if (!showLabels || !showMismatches || !Number.isFinite(+d.mismatches)) {
+        return
+      }
+
+      const x = +label.attr("x")
+      const y = +label.attr("y")
+      const opacity = label.attr("opacity")
+      const fontSize = parseFloat(label.style("font-size")) || fallbackFontSize
+
+      group.append("text")
+        .attr("class", "geneLinkMismatchLabel")
+        .attr("x", x)
+        .attr("y", y + fontSize * 1.1)
+        .attr("opacity", opacity)
+        .attr("filter", showMismatchBackground ? "url(#filter_solid)" : null)
+        .style("fill", "white")
+        .style("text-anchor", "middle")
+        .style("font-family", "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Ubuntu, \"Helvetica Neue\", Oxygen, Cantarell, sans-serif")
+        .style("font-size", `${fontSize}px`)
+        .text(`(${Math.trunc(+d.mismatches)})`)
+    })
   }
 
   // Populate label type multi select and bind change handler
@@ -247,8 +287,12 @@ function plot(data) {
     .on("change", function() {update({link: {label: {position: +this.value}}})})
   d3.select("#input-link-label-show")
     .on("change", function() {update({link: {label: {show: d3.select(this).property("checked")}}})})
+  d3.select("#input-link-mismatch-show")
+    .on("change", function() {update({})})
   d3.select("#input-link-labelbg-show")
     .on("change", function() {update({link: {label: {background: d3.select(this).property("checked")}}})})
+  d3.select("#input-link-mismatch-labelbg-show")
+    .on("change", function() {update({})})
 }
 
 if (typeof data === 'undefined') {
