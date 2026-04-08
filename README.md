@@ -33,10 +33,14 @@ I used blastn web default settings which is:
 
 #### Nucleotide
 <img width="957" height="320" alt="image" src="https://github.com/user-attachments/assets/8aff128c-0627-4942-b7b6-1eec603b7108" />
+
 The result generally looks similar, since higher nucleotide identity will lead to higher amino acid identity.
+
 Main issue of using nucleotide is that it takes much longer than using protein sequence, since it’s X3 longer. Not sure whether I can run this for comparing > 10 strains.
-**Cases where blastn shows higher sensitivity than blastp for detecting variants: **For highly conserved CDS regions, blastp usually gives higher identity values, since protein sequence is more conserved than nucleotide sequence. Thus, using blastp may miss out some nucleotide divergence. For example, there’s a discrepancies between blastn vs. blastp when comparing pandemic O139 (MO10) & Shanghai paracholerae O139 (EL2403). When I only used blastp, it showed 99% identity for the 3’ end region, so i didn’t look deeper into it, but upon using blastn, it shows 96% identity, with ~44 substitution within a single gene (e.g. _wbeV_ gene). 
-**Cases where blastp shows higher sensitivity than blastn for detecting variants: **There are cases where two distant genes (0.4~0.5 blast identity) were linked when using blastn. These genes were filtered out when using blastp, because the identity fell below the cut-off (0.3). This is because blastp uses BLOSUM64 algorithm, which gives penalties based on different amino acid groups, whereas blastn simply uses match/mismatch scores. 
+
+**Cases where blastn shows higher sensitivity than blastp for detecting variants: ** For highly conserved CDS regions, blastp usually gives higher identity values, since protein sequence is more conserved than nucleotide sequence. Thus, using blastp may miss out some nucleotide divergence. For example, there’s a discrepancies between blastn vs. blastp when comparing pandemic O139 (MO10) & Shanghai paracholerae O139 (EL2403). When I only used blastp, it showed 99% identity for the 3’ end region, so i didn’t look deeper into it, but upon using blastn, it shows 96% identity, with ~44 substitution within a single gene (e.g. _wbeV_ gene). 
+
+**Cases where blastp shows higher sensitivity than blastn for detecting variants: ** There are cases where two distant genes (0.4~0.5 blast identity) were linked when using blastn. These genes were filtered out when using blastp, because the identity fell below the cut-off (0.3). This is because blastp uses BLOSUM64 algorithm, which gives penalties based on different amino acid groups, whereas blastn simply uses match/mismatch scores. 
 
 
 ## Command options
