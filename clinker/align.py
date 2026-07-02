@@ -109,7 +109,7 @@ def compare_pairs(one, two):
 
 
 def compute_identity(alignment):
-    """Calculates sequence identity/similarity of a BioPython alignment object."""
+    """Calculates identity/similarity and mismatch count of an alignment."""
 
     similar_acids = [
         {"G", "A", "V", "L", "I"},
@@ -131,7 +131,7 @@ def compute_identity(alignment):
     length = len(one)
 
     # Amino acid similarity groups
-    matches, similar = 0, 0
+    matches, similar, mismatches = 0, 0, 0
     for i in range(length):
         if one[i] == two[i]:
             # Check for gap columns
@@ -140,6 +140,10 @@ def compute_identity(alignment):
             else:
                 length -= 1
         else:
+            # Keep mismatch counting independent from identity denominator
+            # so identity/similarity match original clinker behaviour.
+            if one[i] not in {"-", "."} and two[i] not in {"-", "."}:
+                mismatches += 1
             # If not identical, check if similar
             for group in similar_acids:
                 if one[i] in group and two[i] in group:
@@ -148,7 +152,56 @@ def compute_identity(alignment):
 
     # identity = matches / length - gaps
     # similarity = (matches + similarities) / length - gaps
-    return matches / length, (matches + similar) / length
+    if length <= 0:
+        return 0.0, 0.0, 0
+    return matches / length, (matches + similar) / length, mismatches
+
+
+def compute_nucleotide_identity(alignment):
+    """Calculates nucleotide identity and mismatch count of an alignment."""
+    if biopython_version >= "1.80":
+        one, two = alignment
+    else:
+        one, _, two, _ = str(alignment).split("\n")
+
+    length = len(one)
+    matches = 0
+    mismatches = 0
+    for i in range(length):
+        if one[i] == two[i]:
+            if one[i] not in {"-", "."}:
+                matches += 1
+            else:
+                length -= 1
+        else:
+            # Keep mismatch counting independent from identity denominator
+            # so identity matches original clinker behaviour.
+            if one[i] not in {"-", "."} and two[i] not in {"-", "."}:
+                mismatches += 1
+    if length <= 0:
+        return 0.0, 0.0, 0
+    identity = matches / length
+    # For nucleotide mode, report similarity as identity.
+    return identity, identity, mismatches
+
+
+def _get_gene_sequence(gene, sequence_type):
+    """Returns the sequence to align for a gene."""
+    if sequence_type == "nucleotide":
+        return gene.sequence.strip() if gene.sequence else ""
+    return gene.translation.strip() if gene.translation else ""
+
+
+def _compute_link_scores(aligner, geneA, geneB, sequence_type):
+    """Aligns two genes and returns identity/similarity/mismatch scores."""
+    seqA = _get_gene_sequence(geneA, sequence_type)
+    seqB = _get_gene_sequence(geneB, sequence_type)
+    if not seqA or not seqB:
+        return None
+    aln = aligner.align(seqA, seqB)
+    if sequence_type == "nucleotide":
+        return compute_nucleotide_identity(aln[0])
+    return compute_identity(aln[0])
 
 
 def extend_matrix_alphabet(matrix, codes='BXZJUO'):
@@ -183,6 +236,8 @@ class Globaligner(Serializer):
         "substitution_matrix": "BLOSUM62",
         "open_gap_score": -10,
         "extend_gap_score": -0.5,
+        "sequence_type": "protein",
+        "link_mode": "best",
     }
 
     def __init__(self, aligner_config=None):
@@ -197,10 +252,9 @@ class Globaligner(Serializer):
         self.groups = []
         self.clusters = OrderedDict()
 
-        if aligner_config is None:
-            self.aligner_config = self.aligner_default.copy()
-        else:
-            self.aligner_config = aligner_config
+        self.aligner_config = self.aligner_default.copy()
+        if aligner_config:
+            self.aligner_config.update(aligner_config)
 
     def to_dict(self):
         """Serialises the Globaligner instance to dict.
@@ -302,12 +356,14 @@ class Globaligner(Serializer):
         self,
         delimiter=None,
         decimals=4,
+        show_mismatches=False,
         alignment_headers=True,
         link_headers=False,
     ):
         return format_globaligner(
             self,
             decimals=decimals,
+            show_mismatches=show_mismatches,
             delimiter=delimiter,
             alignment_headers=alignment_headers,
             link_headers=link_headers,
@@ -361,40 +417,91 @@ class Globaligner(Serializer):
         LOG.info("%s vs %s", one.name, two.name)
 
         aligner = Align.PairwiseAligner()
+        config = config.copy()
+        sequence_type = config.pop("sequence_type", "protein")
+        link_mode = config.pop("link_mode", "best")
+        if sequence_type not in {"protein", "nucleotide"}:
+            LOG.warning("Invalid sequence_type '(%s)', defaulting to protein", sequence_type)
+            sequence_type = "protein"
+        if link_mode not in {"all", "best"}:
+            LOG.warning("Invalid link_mode '(%s)', defaulting to all", link_mode)
+            link_mode = "all"
 
-        # Select the substitution matrix.
-        # Defaults to BLOSUM62 when none or invalid matrix specified.
-        matrix = config.pop("substitution_matrix", "BLOSUM62")
-        if matrix not in substitution_matrices.load():
-            LOG.warning("Invalid substitution matrix '(%s)', defaulting to BLOSUM62", matrix)
-            matrix = "BLOSUM62"
-        aligner.substitution_matrix = substitution_matrices.load(matrix)
+        if sequence_type == "protein":
+            # Select the substitution matrix.
+            # Defaults to BLOSUM62 when none or invalid matrix specified.
+            matrix = config.pop("substitution_matrix", "BLOSUM62")
+            if matrix not in substitution_matrices.load():
+                LOG.warning("Invalid substitution matrix '(%s)', defaulting to BLOSUM62", matrix)
+                matrix = "BLOSUM62"
+            aligner.substitution_matrix = substitution_matrices.load(matrix)
 
-        # ValueError is thrown during sequence alignment when a letter
-        # in the sequence is not found in the substitution matrix.
-        # Extended IUPAC codes (BXZJUO) are added to mitigate this.
-        aligner.substitution_matrix = extend_matrix_alphabet(
-            aligner.substitution_matrix,
-            codes='BXZJUO-.',
-        )
+            # ValueError is thrown during sequence alignment when a letter
+            # in the sequence is not found in the substitution matrix.
+            # Extended IUPAC codes (BXZJUO) are added to mitigate this.
+            aligner.substitution_matrix = extend_matrix_alphabet(
+                aligner.substitution_matrix,
+                codes='BXZJUO-.',
+            )
+        else:
+            # PairwiseAligner cannot use substitution_matrix together with
+            # match/mismatch scores, so remove any configured matrix.
+            config.pop("substitution_matrix", None)
+            # BLASTN-like default scoring profile for nucleotide alignments.
+            # Force these values so protein defaults are not reused.
+            config["match_score"] = 1.0
+            config["mismatch_score"] = -2.0
+            config["open_gap_score"] = -5.0
+            config["extend_gap_score"] = -2.0
 
         for k, v in config.items():
             setattr(aligner, k, v)
 
         alignment = Alignment(query=one, target=two)
-        for locusA, locusB in product(one.loci, two.loci):
-            for geneA, geneB in product(locusA.genes, locusB.genes):
-                if not geneA.translation or not geneB.translation:
-                    continue
+        genesA = [gene for locus in one.loci for gene in locus.genes]
+        genesB = [gene for locus in two.loci for gene in locus.genes]
+
+        if link_mode == "all":
+            for geneA, geneB in product(genesA, genesB):
                 try:
-                    aln = aligner.align(geneA.translation.strip(),
-                                        geneB.translation.strip())
+                    scores = _compute_link_scores(aligner, geneA, geneB, sequence_type)
                 except:
                     raise
-                identity, similarity = compute_identity(aln[0])
+                if not scores:
+                    continue
+                identity, similarity, mismatches = scores
                 if identity < cutoff:
                     continue
-                alignment.add_link(geneA, geneB, identity, similarity)
+                alignment.add_link(geneA, geneB, identity, similarity, mismatches)
+            return alignment
+
+        # Keep only reciprocal best hits to avoid many-to-many link clutter.
+        best_for_A = {}
+        best_for_B = {}
+        for geneA, geneB in product(genesA, genesB):
+            try:
+                scores = _compute_link_scores(aligner, geneA, geneB, sequence_type)
+            except:
+                raise
+            if not scores:
+                continue
+            identity, similarity, mismatches = scores
+            if identity < cutoff:
+                continue
+
+            bestA = best_for_A.get(geneA.uid)
+            if not bestA or identity > bestA[2] or (identity == bestA[2] and similarity > bestA[3]):
+                best_for_A[geneA.uid] = (geneA, geneB, identity, similarity, mismatches)
+
+            bestB = best_for_B.get(geneB.uid)
+            if not bestB or identity > bestB[2] or (identity == bestB[2] and similarity > bestB[3]):
+                best_for_B[geneB.uid] = (geneA, geneB, identity, similarity, mismatches)
+
+        for geneA_uid, bestA in best_for_A.items():
+            geneA, geneB, identity, similarity, mismatches = bestA
+            bestB = best_for_B.get(geneB.uid)
+            if bestB and bestB[0].uid == geneA_uid:
+                alignment.add_link(geneA, geneB, identity, similarity, mismatches)
         return alignment
 
     def align_clusters(self, one, two, cutoff=0.3):
@@ -475,7 +582,7 @@ class Globaligner(Serializer):
             genes = set(genes)
             overlaps = [i for i, _ in enumerate(self.groups) if not genes.isdisjoint(group.genes)]
             if not overlaps:
-                group = Group(label=f"Group {len(self.groups)}", genes=genes)
+                group = Group(label=f"group{len(self.groups) + 1}", genes=genes)
                 self.groups.append(group)
                 continue
             keep_idx = overlaps[0]
@@ -663,6 +770,7 @@ class Alignment(Serializer):
         self,
         decimals=4,
         delimiter=None,
+        show_mismatches=False,
         alignment_headers=True,
         link_headers=False,
     ):
@@ -670,6 +778,7 @@ class Alignment(Serializer):
             self,
             decimals=decimals,
             delimiter=delimiter,
+            show_mismatches=show_mismatches,
             alignment_headers=alignment_headers,
             link_headers=link_headers,
         )
@@ -687,13 +796,14 @@ class Alignment(Serializer):
         count = len(self.links)
         return total / count
 
-    def add_link(self, query, target, identity, similarity):
+    def add_link(self, query, target, identity, similarity, mismatches=None):
         """Instantiate a new Link from a Gene alignment and save."""
         link = Link(
             query=query,
             target=target,
             identity=identity,
-            similarity=similarity
+            similarity=similarity,
+            mismatches=mismatches,
         )
         self.links.append(link)
 
@@ -701,18 +811,19 @@ class Alignment(Serializer):
 class Link(Serializer):
     """An alignment link between two Gene objects."""
 
-    def __init__(self, uid=None, query=None, target=None, identity=None, similarity=None):
+    def __init__(self, uid=None, query=None, target=None, identity=None, similarity=None, mismatches=None):
         self.uid = uid if uid else str(uuid.uuid4())
         self.query = query
         self.target = target
         self.identity = identity
         self.similarity = similarity
+        self.mismatches = mismatches
 
     def __str__(self):
         return self.format("\t")
 
     def values(self):
-        return [self.query.name, self.target.name, self.identity, self.similarity]
+        return [self.query.name, self.target.name, self.identity, self.similarity, self.mismatches]
 
     def to_dict(self, uids_only=False):
         return {
@@ -721,6 +832,7 @@ class Link(Serializer):
             "target": self.target.uid if uids_only else self.target.to_dict(),
             "identity": self.identity,
             "similarity": self.similarity,
+            "mismatches": self.mismatches,
         }
 
     @classmethod
